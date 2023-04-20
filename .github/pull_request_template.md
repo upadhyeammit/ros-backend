@@ -15,8 +15,8 @@ Please include the __context of this change__ here.
 
 ## Documentation update? :memo:
 
-- [ ] Yes
-- [ ] No
+- [] Yes
+- [] No
 
 ## Security Checklist :lock:
 
@@ -24,13 +24,13 @@ Upon raising this PR please go through [RedHatInsights/secure-coding-checklist](
 
 ## :guardsman: Checklist :dart:
 
-- [ ] Bugfix
-- [ ] New Feature
-- [ ] Refactor
-- [ ] Unittests Added
-- [ ] DRY code
-- [ ] Dependency Added
-- [ ] DB Migration Added
+- [] Bugfix
+- [] New Feature
+- [] Refactor
+- [] Unittests Added
+- [] DRY code
+- [] Dependency Added
+- [] DB Migration Added
 
 ## Additional :mega:
 
