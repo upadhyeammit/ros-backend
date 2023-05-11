@@ -5,9 +5,9 @@ name: [Non blocking] Test changes on latest indirect Python dependencies
 
 on:
   push:
-    branches: [ main ]
+    branches: [ copy-of-github-actions-for-packages ]
   pull_request:
-    branches: [ main ]
+    branches: [ copy-of-github-actions-for-packages ]
 
 jobs:
   build:
