@@ -65,6 +65,9 @@ jobs:
         pip install pipenv
         pipenv install --dev
 
+    - name: Show the flask version
+      run: |
+        pipenv run pip show flask
     - name: Lint with flake8
       run: |
         pip install flake8

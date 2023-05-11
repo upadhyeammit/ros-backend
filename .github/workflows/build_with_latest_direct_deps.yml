@@ -1,13 +1,15 @@
-# This workflow will install Python dependencies, run tests and lint with a single version of Python
-# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+# This workflow will install Python dependencies,
+# run tests and lint with a single version of Python
+# For more information see:
+# https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
 
-name: [Non blocking] Test changes on latest direct Python dependencies
+name: (Non blocking) Test changes on latest direct Python dependencies
 
 on:
   push:
-    branches: [ copy-of-github-actions-for-packages ]
+    branches: [copy-of-github-actions-for-packages]
   pull_request:
-    branches: [ copy-of-github-actions-for-packages ]
+    branches: [copy-of-github-actions-for-packages]
 
 jobs:
   build:
@@ -17,12 +19,12 @@ jobs:
     services:
       postgres:
         image: postgres:9.6
+        ports:
+          - 15432:5432
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: 'ros_db_test'
-        ports:
-        - 15432:5432
         # needed because the postgres container does not provide a healthcheck
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
       zookeeper:
@@ -33,8 +35,8 @@ jobs:
       kafka:
         image: confluentinc/cp-kafka
         ports:
-        - 29092:29092
-        - 9092:9092
+          - 29092:29092
+          - 9092:9092
         env:
           KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
           KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
@@ -68,14 +70,14 @@ jobs:
         name = "pypi"
         url = "https://pypi.org/simple"
         verify_ssl = true
-        
+
         [dev-packages]
         flake8 = "*"
         pytest = "*"
         sqlalchemy-utils = "*"
         pytest-mock = "*"
         pytest-cov = "*"
-        
+
         [packages]
         Flask = "*"
         gunicorn = "*"
@@ -99,11 +101,16 @@ jobs:
         botocore = "*"
         markupsafe = "*"
         flask-caching = "*"
-        
+
         [requires]
         python_version = "3.8"
         EOF`" > Pipfile
-        pipenv update --dev
+        rm -rf Pipfile.lock
+        pipenv install --dev
+    
+    - name: Show all installed packages
+      run: |
+        pipenv run pip list
 
     - name: Lint with flake8
       run: |
