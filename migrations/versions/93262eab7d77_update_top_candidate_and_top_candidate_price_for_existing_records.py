@@ -1,8 +1,8 @@
 """Update top_candidate and top_candidate_price for existing records of PerformanceProfile
 
-Revision ID: 85b118d10b34
-Revises: 5f72a9f8b2d2
-Create Date: 2023-07-19 19:31:53.519338
+Revision ID: 93262eab7d77
+Revises: c6f2cd708cea
+Create Date: 2023-07-31 19:41:07.252297
 
 """
 from alembic import op
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '85b118d10b34'
-down_revision = '5f72a9f8b2d2'
+revision = '93262eab7d77'
+down_revision = 'c6f2cd708cea'
 branch_labels = None
 depends_on = None
 
