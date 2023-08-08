@@ -28,7 +28,7 @@ class PerformanceProfile(db.Model):
             ondelete='CASCADE'),
         db.Index('non_optimized_system_profiles', number_of_recommendations, unique=False,
                  postgresql_where=(number_of_recommendations > 0)),
-        db.Index('Index for instance types', top_candidate)
+        db.Index('top_candidate_idx', top_candidate)
     )
 
     @property

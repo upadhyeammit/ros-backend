@@ -18,6 +18,17 @@ from ros.api.common.pagination import (
     offset_value,
     build_paginated_system_list_response
 )
+from ros.api.common import instance_descriptions
+
+
+def non_null_suggested_instance_types():
+    org_id = org_id_from_identity_header(request)
+    systems_query = system_ids_by_org_id(org_id)
+    return db.session.query(PerformanceProfile.top_candidate,
+                            func.count(PerformanceProfile.system_id).label('system_count')).filter(
+        PerformanceProfile.top_candidate.is_not(None)).filter(
+        PerformanceProfile.system_id.in_(systems_query)).group_by(PerformanceProfile.top_candidate).order_by(
+        PerformanceProfile.top_candidate)
 
 
 class SuggestedInstanceTypes(Resource):
@@ -49,36 +60,17 @@ class SuggestedInstanceTypes(Resource):
         limit = limit_value()
         offset = offset_value()
 
-        query = self.non_null_suggested_instance_types
+        query = non_null_suggested_instance_types
         count = query.count()
         query = query.limit(limit).offset(offset)
         query_result = query.all()
 
-        suggested_instances = []
+        suggested_instance_types = []
         for row in query_result:
-            # As of now we only support AWS cloud, so statically adding it to the dict
+            # FIXME: As of now we only support AWS cloud, so statically adding it to the dict. Fix this code block
+            #  upon supporting multiple clouds.
             record = {'instance_type': row.top_candidate, 'cloud_provider': 'AWS', 'system_count': row.system_count,
-                      'description': self.instance_descriptions[row.top_candidate]}
-            suggested_instances.append(record)
+                      'description': instance_descriptions[row.top_candidate]}
+            suggested_instance_types.append(record)
 
-        return build_paginated_system_list_response(limit, offset, suggested_instances, count)
-
-    @property
-    def non_null_suggested_instance_types(self):
-        org_id = org_id_from_identity_header(request)
-        systems_query = system_ids_by_org_id(org_id)
-        return db.session.query(PerformanceProfile.top_candidate,
-                                func.count(PerformanceProfile.system_id).label('system_count')).filter(
-            PerformanceProfile.top_candidate.is_not(None)).filter(
-            PerformanceProfile.system_id.in_(systems_query)).group_by(PerformanceProfile.top_candidate).order_by(
-            PerformanceProfile.top_candidate)
-
-    @property
-    def instance_descriptions(self):
-        instance_and_descriptions = {}
-        for instance, info in INSTANCE_TYPES.items():
-            processor = info['extra']['physicalProcessor']
-            v_cpu = info['extra']['vcpu']
-            memory = info['extra']['memory']
-            instance_and_descriptions[instance] = f"{processor} instance with {v_cpu} vCPUs and {memory} RAM"
-        return instance_and_descriptions
+        return build_paginated_system_list_response(limit, offset, suggested_instance_types, count)
