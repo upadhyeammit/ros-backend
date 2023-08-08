@@ -1,7 +1,6 @@
 from flask import request
 from sqlalchemy import func
 from flask_restful import Resource, fields, marshal_with
-from ros.lib.aws_instance_types import INSTANCE_TYPES
 
 from ros.lib.utils import (
     system_ids_by_org_id,
