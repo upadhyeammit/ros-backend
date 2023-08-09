@@ -295,6 +295,25 @@
                     }
                 }
             }
+        },
+        "/suggested_instance_types": {
+            "get": {
+                "summary": "List all suggested instance types for the system",
+                "description": "Lists the systems and their suggested instance type as per the Resource Optimization Rules",
+                "operationId": "getSuggestedInstanceTypes",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SuggestedInstanceTypes"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
     },
@@ -824,6 +843,40 @@
                     "message": {
                         "type": "string",
                         "description": "Message text"
+                    }
+                }
+            },
+            "SuggestedInstanceTypes": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SuggestedInstanceTypesItem"
+                        }
+                    },
+                    "links": {
+                        "$ref": "#/components/schemas/Links"
+                    },
+                    "meta": {
+                        "$ref": "#/components/schemas/ListMeta"
+                    }
+                }
+            },
+            "SuggestedInstanceTypesItem": {
+                "type": "object",
+                "properties": {
+                    "instance_type": {
+                        "type": "string"
+                    },
+                    "cloud_provider": {
+                        "type": "string"
+                    },
+                    "system_count": {
+                        "type": "integer"
+                    },
+                    "description": {
+                        "type": "string"
                     }
                 }
             }
