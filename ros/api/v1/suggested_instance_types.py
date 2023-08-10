@@ -17,7 +17,7 @@ from ros.api.common.pagination import (
     offset_value,
     build_paginated_system_list_response
 )
-from ros.api.common import instance_descriptions
+from ros.api.common.instance_descriptions import descriptions
 
 
 def non_null_suggested_instance_types():
@@ -69,7 +69,7 @@ class SuggestedInstanceTypes(Resource):
             # FIXME: As of now we only support AWS cloud, so statically adding it to the dict. Fix this code block
             #  upon supporting multiple clouds.
             record = {'instance_type': row.top_candidate, 'cloud_provider': 'AWS', 'system_count': row.system_count,
-                      'description': instance_descriptions[row.top_candidate]}
+                      'description': descriptions()[row.top_candidate]}
             suggested_instance_types.append(record)
 
         return build_paginated_system_list_response(limit, offset, suggested_instance_types, count)

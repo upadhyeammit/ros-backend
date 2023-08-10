@@ -3,7 +3,7 @@ from ros.extensions import cache
 
 
 @cache.cached(timeout=0)
-def instance_descriptions(self):
+def descriptions():
     instance_and_descriptions = {}
     for instance, info in INSTANCE_TYPES.items():
         processor = info['extra']['physicalProcessor']
