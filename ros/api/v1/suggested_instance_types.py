@@ -1,7 +1,7 @@
 from flask import request
 from sqlalchemy import func
 from flask_restful import Resource, fields, marshal_with
-
+from ros.api.common.add_group_filter import group_filtered_query
 from ros.lib.utils import (
     system_ids_by_org_id,
     org_id_from_identity_header,
@@ -22,7 +22,7 @@ from ros.api.common import instance_descriptions
 
 def non_null_suggested_instance_types():
     org_id = org_id_from_identity_header(request)
-    systems_query = system_ids_by_org_id(org_id)
+    systems_query = group_filtered_query(system_ids_by_org_id(org_id))
     return db.session.query(PerformanceProfile.top_candidate,
                             func.count(PerformanceProfile.system_id).label('system_count')).filter(
         PerformanceProfile.top_candidate.is_not(None)).filter(
