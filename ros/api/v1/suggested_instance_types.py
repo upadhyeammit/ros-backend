@@ -1,6 +1,6 @@
 from flask import request
-from sqlalchemy import func
-from flask_restful import Resource, fields, marshal_with
+from sqlalchemy import func, asc, desc
+from flask_restful import Resource, fields, marshal_with, abort
 from ros.api.common.add_group_filter import group_filtered_query
 from ros.lib.utils import (
     system_ids_by_org_id,
@@ -26,8 +26,7 @@ def non_null_suggested_instance_types():
     return db.session.query(PerformanceProfile.top_candidate,
                             func.count(PerformanceProfile.system_id).label('system_count')).filter(
         PerformanceProfile.top_candidate.is_not(None)).filter(
-        PerformanceProfile.system_id.in_(systems_query)).group_by(PerformanceProfile.top_candidate).order_by(
-        PerformanceProfile.top_candidate)
+        PerformanceProfile.system_id.in_(systems_query)).group_by(PerformanceProfile.top_candidate)
 
 
 class SuggestedInstanceTypes(Resource):
@@ -58,12 +57,15 @@ class SuggestedInstanceTypes(Resource):
     def get(self):
         limit = limit_value()
         offset = offset_value()
-
-        query = non_null_suggested_instance_types
+        order_by = (
+            request.args.get('order_by') or 'system_count'
+        ).strip().lower()
+        order_how = (request.args.get('order_how') or 'desc').strip().lower()
+        sort_expression = self.build_sort_expression(order_how, order_by)
+        query = non_null_suggested_instance_types().filter(*self.build_instance_filters()).order_by(*sort_expression)
         count = query.count()
         query = query.limit(limit).offset(offset)
         query_result = query.all()
-
         suggested_instance_types = []
         for row in query_result:
             # FIXME: As of now we only support AWS cloud, so statically adding it to the dict. Fix this code block
@@ -71,5 +73,40 @@ class SuggestedInstanceTypes(Resource):
             record = {'instance_type': row.top_candidate, 'cloud_provider': 'AWS', 'system_count': row.system_count,
                       'description': descriptions()[row.top_candidate]}
             suggested_instance_types.append(record)
-
         return build_paginated_system_list_response(limit, offset, suggested_instance_types, count)
+
+    @staticmethod
+    def build_instance_filters():
+        filters = []
+        if filter_instance_type := request.args.get('instance_type'):
+            filters.append(PerformanceProfile.top_candidate.ilike(f'%{filter_instance_type}'))
+        # To Do: once we have multi cloud support add filter for cloud provider
+        return filters
+
+    @staticmethod
+    def sorting_order(order_how):
+        """Sorting order method."""
+        method_name = None
+        if order_how == 'asc':
+            method_name = asc
+        elif order_how == 'desc':
+            method_name = desc
+        else:
+            abort(
+                403,
+                message="Incorrect sorting order. Possible values - ASC/DESC"
+            )
+        return method_name
+
+    def build_sort_expression(self, order_how, order_method):
+        """Build sort expression."""
+        sort_order = self.sorting_order(order_how)
+
+        if order_method == 'instance_type':
+            return (sort_order(PerformanceProfile.top_candidate),)
+
+        if order_method == 'system_count':
+            return (sort_order(func.count(PerformanceProfile.system_id)),)
+
+        abort(403, message="Unexpected sort method {}".format(order_method))
+        return None
