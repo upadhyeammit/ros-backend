@@ -530,7 +530,7 @@ def test_systems_mock_rbac_returns_multiple_inventory_hosts_read(
         mock_unleash_hbi_flag_enabled(mocker)
         response = client.get('/api/ros/v1/systems', headers={"x-rh-identity": auth_token})
         assert response.status_code == 200
-        assert response.json["meta"]["count"] == 3
+        assert response.json["meta"]["count"] == 2
 
 
 def test_systems_mock_rbac_returns_multiple_types_of_read_permissions(
@@ -550,7 +550,7 @@ def test_systems_mock_rbac_returns_multiple_types_of_read_permissions(
         mock_rbac(get_rbac_mock_file("mock_rbac_returns_multiple_types_of_read_permissions.json"), mocker)
         response = client.get('/api/ros/v1/systems', headers={"x-rh-identity": auth_token})
         assert response.status_code == 200
-        assert response.json["meta"]["count"] == 4
+        assert response.json["meta"]["count"] == 3
 
 
 def test_systems_mock_rbac_returns_array_of_groups(
@@ -569,5 +569,6 @@ def test_systems_mock_rbac_returns_array_of_groups(
         # This mocks example, test and foo groups returned in single array
         mock_rbac(get_rbac_mock_file("mock_rbac_returns_array_of_groups.json"), mocker)
         response = client.get('/api/ros/v1/systems', headers={"x-rh-identity": auth_token})
+        import pdb;pdb.set_trace()
         assert response.status_code == 200
-        assert response.json["meta"]["count"] == 4
+        assert response.json["meta"]["count"] == 3

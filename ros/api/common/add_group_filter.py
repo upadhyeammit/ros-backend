@@ -8,8 +8,10 @@ logger = get_logger(__name__)
 
 def group_filtered_query(query):
     if get_flag_value(FLAG_INVENTORY_GROUPS):
-        if len(get_host_groups()) >= 1:
+        if len(get_host_groups()) >= 1 and None in request.host_groups:
             query = query.filter(System.groups[0]['id'].astext.in_(get_host_groups()) | (System.groups == '[]'))
+        elif len(get_host_groups()) >= 1 and None not in request.host_groups:
+            query = query.filter(System.groups[0]['id'].astext.in_(get_host_groups()))
         else:
             query = query.filter((System.groups == '[]'))
     return query
