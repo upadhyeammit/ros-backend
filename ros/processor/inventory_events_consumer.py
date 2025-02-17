@@ -51,6 +51,7 @@ class InventoryEventsConsumer:
     def run(self):
         """Initialize Consumer."""
         LOG.info(f"{self.prefix} - Processor is running. Awaiting msgs.")
+        
         for msg in iter(self):
             if msg.error():
                 LOG.error(f"{self.prefix} - Consumer error: {msg.error()}")

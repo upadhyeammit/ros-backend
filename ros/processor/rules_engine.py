@@ -1,52 +1,52 @@
-import os
-import json
-import shutil
-import subprocess
-from http import HTTPStatus
-from contextlib import contextmanager
-from tempfile import NamedTemporaryFile
-from insights import run as insights_run
-import requests
-from insights import extract
-from prometheus_client import start_http_server
-from ros.lib import consume
-from ros.lib.config import (
-    get_logger,
-    METRICS_PORT,
-    INVENTORY_EVENTS_TOPIC,
-    GROUP_ID_SUGGESTIONS_ENGINE,
-)
+"""
+Instance Evaluation as per the ROS
+==================================
+ROS for AWS and Azure
 
-### rules import
+PoC: https://gitlab.cee.redhat.com/pgarciaq/rosrules
+
+
+Conditions::
+
+    1. RHEL
+    2. RosConfig
+    3. PmLogSummary (depends on RosConfig) is collected
+    4. Calculate the evaluation result
+
+Logic::
+
+    1 and 2 and not 3 => NO_PCP_DATA
+
+    1 and 2 and 3 and 4 =>
+      - make_metadata
+      - make_fail => OVERSIZED, UNDERSIZED, or UNDER_PRESSURE
+
+FUTURE_RELEASE_REVIEW: PCP, ROS
+"""
+import logging
 from math import isclose
 from functools import reduce
 from collections import namedtuple, defaultdict
 
 from insights import SkipComponent, add_filter
-from insights.core.plugins import make_metadata, make_fail, rule, condition, parser
-from insights.core import Parser
-from insights.core.context import HostArchiveContext
+from insights.core.plugins import make_metadata, make_fail, rule, condition
 from insights.parsers.lscpu import LsCPU
 from insights.parsers.cmdline import CmdLine
 from insights.parsers.ros_config import RosConfig
 from insights.parsers.insights_client_conf import InsightsClientConf
-from insights.parsers.pmlog_summary import PmLogSummaryBase
+from insights.parsers.pmlog_summary import PmLogSummaryBase, PmLogSummaryPcpZeroConf
 from insights.parsers.azure_instance import AzureInstanceType
 from insights.parsers.aws_instance_id import AWSInstanceIdDoc
-from insights.core.spec_factory import SpecSet, simple_file
+
 from insights.combiners.cloud_provider import CloudProvider
 from ros.processor.ros_rules_engine.rhel_release import RhelRelease
 from ros.processor.ros_rules_engine import Ec2LinuxPrices
 from ros.processor.ros_rules_engine.ec2_instance_types import INSTANCE_TYPES as EC2_INSTANCE_TYPES
 from ros.processor.ros_rules_engine.rules_data import RosThresholds, RosKeys
+from ros.processor.suggestions_engine import PMLOGSUMMARY
 from ros.processor.context_wrap import context_wrap
-import pdb
 
 
-logging = get_logger(__name__)
-
-
-#################################################################################################################
 
 add_filter(InsightsClientConf, ['ros_collect'])
 ERROR_KEY_NO_DATA = "NO_PCP_DATA"
@@ -81,75 +81,6 @@ class PmLogSummaryRules(PmLogSummaryBase):
     Parser to parse the content of `pmlog_summary` spec.
     """
     pass
-
-class RosPmlogsummary(SpecSet):
-    pmlogsummary = simple_file("/tmp/pmlogsummary", context="")
-    
-        
-@parser(RosPmlogsummary.pmlogsummary)
-class RosPmlogsummaryParser(Parser):
-    def parse_content(self, content):
-        """
-        Parse a set of key/value pairs into a hierarchical dictionary of
-        typed values
-
-        Arguments:
-            data (dict): Input dictionary of key/value pairs
-
-        Returns:
-            dict: Hierarchical dictionary with keys separated at "." and type
-            conversion of the numerical values
-        """
-        result = {}
-
-        def typed(x):
-            try:
-                return float(x)
-            except Exception:
-                return x
-
-        def insert(k, v):
-            cur = result
-            key_parts = k.split(".")
-            # process the '["xxx"]' part as a sub-key
-            if v.startswith('['):
-                mk, _, v = v.partition(']')
-                key_parts.append(mk.strip('"[]'))
-                v = v.strip()
-
-            # walk down the structure to the correct leaf
-            for part in key_parts:
-                if part not in cur:
-                    cur[part] = {}
-                cur = cur[part]
-
-            # break the value apart and store it
-            l, r = v.split(None, 1)
-            cur["val"] = typed(l)
-            cur["units"] = r.strip()
-
-        def kvs():
-            # deal with whitespace and high level splitting
-            for line in data:
-                line = line.strip()
-                if line:
-                    yield line.split(None, 1)
-
-        for k, v in kvs():
-            insert(k, v)
-
-        return result
-
-    # def parse_content(self, content):
-    #     data = self.parse(content)
-    #     pdb.set_trace()
-    #     if len(data) == 0:
-    #         raise SkipComponent()
-    #     print("dddddddddddddddddddddddddddattttttttttttttttttta", data)
-    #     self.update(data)
-    
-    
-
 
 def readable_evalution(ret):
     ERROR_KEYs = [
@@ -187,10 +118,11 @@ def readable_evalution(ret):
 # Conditions
 # ---------------------------------------------------------------------------
 
-# @condition(PmLogSummaryRules)
-# def parsed_pmlogsummary(pm):
-#     instance_pmlogsummary = PmLogSummaryRules(context_wrap(output_of_pmlogsummary, path="/tmp"))
-#     return instance_pmlogsummary
+@condition(PmLogSummaryRules)
+def parsed_pmlogsummary(pm):
+    instance_pmlogsummary = PmLogSummaryRules(context_wrap(PMLOGSUMMARY, path="/tmp"))
+    logging.info(f"PMLOGSUMMARY {instance_pmlogsummary}")
+    return instance_pmlogsummary
 
 @condition(CloudProvider, [AWSInstanceIdDoc, AzureInstanceType])
 def cloud_metadata(cp, aws, azure):
@@ -209,7 +141,7 @@ def cloud_metadata(cp, aws, azure):
     raise SkipComponent
 
 
-@condition(optional=[RosConfig, InsightsClientConf, RosPmlogsummaryParser])
+@condition(optional=[RosConfig, InsightsClientConf, [parsed_pmlogsummary]])
 def no_pmlog_summary(ros_cfg, old_pm, cli_cfg, new_pm):
     # Any of:
     # 1. RosConfig is enabled
@@ -222,9 +154,8 @@ def no_pmlog_summary(ros_cfg, old_pm, cli_cfg, new_pm):
     # raise SkipComponent
     pass
 
-@condition([RosPmlogsummaryParser], optional=[LsCPU])
+@condition([parsed_pmlogsummary], optional=[LsCPU])
 def cpu_utilization(new_pm, lscpu):
-    import pdb;pdb.set_trace()
     pls = new_pm
     try:
         # Get ncpu from PmLogSummary at first, then LsCPU
@@ -237,7 +168,7 @@ def cpu_utilization(new_pm, lscpu):
         raise SkipComponent("No 'cpu' data")
 
 
-@condition([RosPmlogsummaryParser])
+@condition([parsed_pmlogsummary])
 def mem_utilization(new_pm):
     pls = new_pm
     try:
@@ -250,7 +181,7 @@ def mem_utilization(new_pm):
         raise SkipComponent("No 'mem' data")
 
 
-@condition([RosPmlogsummaryParser], cloud_metadata)
+@condition([parsed_pmlogsummary], cloud_metadata)
 def io_utilization(new_pm,cm):
     pls = new_pm
     try:
@@ -272,7 +203,7 @@ def psi_enabled(cmdline):
     return 'psi' in cmdline and cmdline['psi'][-1] == '1'
 
 
-@condition(psi_enabled, [RosPmlogsummaryParser])
+@condition(psi_enabled, [parsed_pmlogsummary])
 def psi_utilization(psi, new_pm):
     if not psi:
         raise SkipComponent("PSI not enabled")
@@ -495,9 +426,8 @@ def report_metadata(rhel, cloud, psi, cpu, mem, io):
     return make_metadata(**ret)
 
 
-@rule(cloud_metadata, no_pmlog_summary, links=LINKS, optional=[RhelRelease])
-def report_no_data(cloud, no_pls, rhel):
-    pdb.set_trace()
+@rule(RhelRelease, cloud_metadata, no_pmlog_summary, links=LINKS)
+def report_no_data(rhel, cloud, no_pls):
     return make_fail(
         no_pls,
         rhel=rhel.rhel,
@@ -505,8 +435,8 @@ def report_no_data(cloud, no_pls, rhel):
         instance_type=cloud.type)
 
 
-@rule(cloud_metadata, find_solution, links=LINKS, optional=[RhelRelease])
-def report(cloud, solution, rhel):
+@rule(RhelRelease, cloud_metadata, find_solution, links=LINKS)
+def report(rhel, cloud, solution):
     ret_dict = dict(
         rhel=rhel.rhel,
         cloud_provider=cloud.provider,
@@ -515,235 +445,5 @@ def report(cloud, solution, rhel):
         price=solution[1],
         candidates=solution[3],
     )
-    pdb.set_trace()
     ret_dict.update(states=solution[2]) if solution[2] else None
     return make_fail(solution[0], **ret_dict)
-
-
-#################################################################################################################
-
-
-
-class SuggestionsEngine:
-    def __init__(self):
-        self.consumer = consume.init_consumer(INVENTORY_EVENTS_TOPIC, GROUP_ID_SUGGESTIONS_ENGINE)
-        self.service = 'SUGGESTIONS_ENGINE'
-        self.event = None
-
-    def run_pmlogextract(self, host, index_file_path, output_dir):
-        """Run the pmlogextract command."""
-
-        pmlogextract_command = [
-            "pmlogextract",
-            "-c",
-            "ros/lib/pcp_extract_config",
-            index_file_path,
-            output_dir
-        ]
-
-        logging.debug(f"{self.service} - {self.event} - Running pmlogextract command for system {host.get('id')}.")
-        try:
-            subprocess.run(pmlogextract_command, check=True)
-            logging.debug(
-                f"{self.service} - {self.event} - Successfully ran pmlogextract command for system {host.get('id')}."
-            )
-        except subprocess.CalledProcessError as error:
-            logging.error(
-                f"{self.service} - {self.event} - Error running pmlogextract command for system {host.get('id')}:"
-                f" {error.stdout}"
-            )
-            raise
-
-    def run_pmlogsummary(self, host, output_dir):
-        """Run the pmlogsummary command."""
-        global output_of_pmlogsummary
-        pmlogsummary_command = [
-            "pmlogsummary",
-            "-f",
-            os.path.join(output_dir, ".index")
-        ]
-
-        logging.debug(f"{self.service} - {self.event} - Running pmlogsummary command for system {host.get('id')}.")
-        try:
-            file_output = open("/tmp/pmlogsummary", 'w')
-            subprocess.run(pmlogsummary_command, check=True, text=True, stdout=file_output)
-            logging.debug(
-                f"{self.service} - {self.event} - Successfully ran pmlogsummary command for system {host.get('id')}."
-            )
-
-            # RosPmlogsummary.pmlogsummary = results.stdout
-        except subprocess.CalledProcessError as error:
-            logging.error(
-                f"{self.service} - {self.event} - Error running pmlogsummary command for system {host.get('id')}:"
-                f" {error.stdout}"
-            )
-            raise
-
-    def create_output_dir(self, request_id, host):
-        output_dir = f"/var/tmp/pmlogextract-output-{request_id}/"
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-
-        logging.debug(f"Successfully created output_dir for system {host.get('id')}: {output_dir}")
-
-        return output_dir
-
-    def run_pcp_commands(self, host, index_file_path, request_id):
-        sanitized_request_id = request_id.replace("/", "_")
-        output_dir = self.create_output_dir(sanitized_request_id, host)
-
-        self.run_pmlogextract(host, index_file_path, output_dir)
-
-        self.run_pmlogsummary(host, output_dir)
-
-        logging.info(f"{self.service} - {self.event} - Successfully ran pcp commands for system {host.get('id')}.")
-
-        try:
-            if os.path.exists(output_dir):
-                shutil.rmtree(output_dir)
-                logging.debug(
-                    f"{self.service} - {self.event} - Cleaned up output directory for system {host.get('id')}."
-                )
-        except Exception as error:
-            logging.error(
-                f"{self.service} - {self.event} - Error cleaning up the output directory for system {host.get('id')}:"
-                f" {error}"
-            )
-
-    def find_root_directory(self, directory, target_file):
-        """
-        Recursively search for the target file in the given directory - to get root directory of an archive.
-        """
-        for dirpath, _, filenames in os.walk(directory):
-            if target_file in filenames:
-                return dirpath
-
-        return None
-
-    def get_index_file_path(self, host, extracted_dir):
-        extracted_dir_root = self.find_root_directory(extracted_dir, "insights_archive.txt")
-
-        if not extracted_dir_root:
-            logging.error(
-                f"{self.service} - {self.event} -"
-                f" insights_archive.txt not found in the extracted dir for system {host.get('id')}"
-            )
-            return None
-
-        pmlogger_dir = os.path.join(extracted_dir_root, "data/var/log/pcp/pmlogger/")
-
-        index_files = [
-            file for file in os.listdir(pmlogger_dir) if file.endswith(".index")
-        ]
-        index_file_path = os.path.join(pmlogger_dir, index_files[0])
-
-        return index_file_path
-
-    def parse_lscpu(self, dir_path):
-        parsed_lscpu = LsCPU(context_wrap(path=dir_path))        
-
-    @contextmanager
-    def download_and_extract(self, archive_URL, host, org_id):
-        logging.debug(f"{self.service} - {self.event} - Report downloading for system {host.get('id')}.")
-
-        try:
-            response = requests.get(archive_URL, timeout=10)
-            self.consumer.commit()
-
-            if response.status_code != HTTPStatus.OK:
-                logging.error(
-                    f"{self.service} - {self.event} - Unable to download the report for system {host.get('id')}. "
-                    f"ERROR - {response.reason}"
-                )
-                yield None
-            else:
-                with NamedTemporaryFile(delete=True) as tempfile:
-                    tempfile.write(response.content)
-                    logging.info(
-                        f"{self.service} - {self.event} - Report downloaded successfully for system {host.get('id')}"
-                    )
-                    tempfile.flush()
-                    with extract(tempfile.name) as extract_dir:
-                        yield extract_dir
-        except Exception as error:
-            logging.error(f"{self.service} - {self.event} - Error occurred during download and extraction: {error}")
-
-    def is_pcp_collected(self, platform_metadata):
-        return (
-            platform_metadata.get('is_ros_v2') and
-            platform_metadata.get('is_pcp_raw_data_collected')
-        )
-
-    def handle_create_update(self, payload):
-        self.event = "Update event" if payload.get('type') == 'updated' else "Create event"
-
-        platform_metadata = payload.get('platform_metadata')
-        host = payload.get('host')
-
-        if platform_metadata is None or host is None:
-            logging.info(f"{self.service} - {self.event} - Missing host or/and platform_metadata field(s).")
-            return
-
-        if not self.is_pcp_collected(platform_metadata):
-            return
-
-        archive_URL = platform_metadata.get('url')
-        with self.download_and_extract(
-                archive_URL,
-                host,
-                org_id=host.get('org_id')
-        ) as ext_dir:
-            extracted_dir = ext_dir.tmp_dir
-            index_file_path = self.get_index_file_path(host, extracted_dir)
-
-    
-            if index_file_path is not None:
-                self.run_pcp_commands(host, index_file_path, platform_metadata.get('request_id'))
-            
-            
-            # parsed_pmlogsummary()
-            pdb.set_trace()      
-            # insights-ip-172-31-10-0.ap-northeast-1.compute.internal-20241231143635
-            res = insights_run(report_no_data, root=extracted_dir)
-            res1 = insights_run(report, root=extracted_dir)
-            res2 = insights_run(report_metadata, root=extracted_dir)
-            
-        
-
-        
-    def run(self):
-        logging.info(f"{self.service} - Engine is running. Awaiting msgs.")
-        try:
-            while True:
-                message = self.consumer.poll(timeout=1.0)
-                if message is None:
-                    continue
-
-                try:
-                    payload = json.loads(message.value().decode('utf-8'))
-                    event_type = payload['type']
-
-                    if 'created' == event_type or 'updated' == event_type:
-                        self.handle_create_update(payload)
-                    
-                    # with NamedTemporaryFile(delete=True) as tempfile:
-                    #     tempfile.write(self.pmlogsummary_output)
-                        
-                    #     # ct = Context(tempfile, tempfile.name)
-                    
-                    
-                except json.JSONDecodeError as error:
-                    logging.error(f"{self.service} - {self.event} - Failed to decode message: {error}")
-                except Exception as error:
-                    logging.error(f"{self.service} - {self.event} - Error processing message: {error}")
-
-        except Exception as error:
-            logging.error(f"{self.service} - {self.event} - error: {error}")
-        finally:
-            self.consumer.close()
-
-
-if __name__ == "__main__":
-    start_http_server(int(METRICS_PORT))
-    processor = SuggestionsEngine()
-    processor.run()
